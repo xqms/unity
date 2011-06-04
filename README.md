@@ -20,3 +20,15 @@ Much to be done:
   forward and which ones to give to the own host
 - Configuration file
 - More documentation
+- Other platforms?
+
+Usage
+-----
+
+Start unity on one machine (192.168.0.1, on the right side):
+
+    xq@PC1$ unity
+
+Then connect on the other machine (192.168.0.2, on the left side):
+
+    xq@PC2$ unity right 192.168.0.1
