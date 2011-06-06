@@ -30,7 +30,7 @@ namespace proto
 	
 	struct KeyInfo
 	{
-		uint32_t keycode;
+		uint32_t keysym;
 	};
 	
 	struct Packet
@@ -107,23 +107,23 @@ namespace proto
 		return buttonEvent(Packet::T_BUTTONRELEASE, button);
 	}
 	
-	inline Packet keyEvent(Packet::Type type, uint32_t keycode)
+	inline Packet keyEvent(Packet::Type type, uint32_t keysym)
 	{
 		Packet ret;
 		ret.type = type;
-		ret.key.keycode = keycode;
+		ret.key.keysym = keysym;
 		
 		return ret;
 	}
 	
-	inline Packet keyPress(uint32_t keycode)
+	inline Packet keyPress(uint32_t keysym)
 	{
-		return keyEvent(Packet::T_KEYPRESS, keycode);
+		return keyEvent(Packet::T_KEYPRESS, keysym);
 	}
 	
-	inline Packet keyRelease(uint32_t keycode)
+	inline Packet keyRelease(uint32_t keysym)
 	{
-		return keyEvent(Packet::T_KEYRELEASE, keycode);
+		return keyEvent(Packet::T_KEYRELEASE, keysym);
 	}
 }
 

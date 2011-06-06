@@ -124,10 +124,10 @@ void handlePacket(const proto::Packet& packet, Client* client)
 			injector->injectButtonEvent(packet.button.number, false);
 			break;
 		case proto::Packet::T_KEYPRESS:
-			injector->injectKeyEvent(packet.key.keycode, true);
+			injector->injectKeyEvent(packet.key.keysym, true);
 			break;
 		case proto::Packet::T_KEYRELEASE:
-			injector->injectKeyEvent(packet.key.keycode, false);
+			injector->injectKeyEvent(packet.key.keysym, false);
 			break;
 	}
 }
@@ -172,10 +172,16 @@ void handleXEvents()
 				distributePacket(proto::buttonRelease(event.xbutton.button));
 				break;
 			case KeyPress:
-				distributePacket(proto::keyPress(event.xkey.keycode));
-				break;
 			case KeyRelease:
-				distributePacket(proto::keyRelease(event.xkey.keycode));
+				{
+					int keysym = XLookupKeysym(&event.xkey, 0);
+					distributePacket(
+						proto::keyEvent(
+							(event.type == KeyPress) ? proto::Packet::T_KEYPRESS : proto::Packet::T_KEYRELEASE,
+							keysym
+						)
+					);
+				}
 				break;
 		}
 	}
@@ -252,7 +258,7 @@ void connectTo(Direction dir, const char* host)
 
 int main(int argc, char **argv)
 {
-	QApplication app(argc, argv);
+	setlocale(LC_ALL, "");
 	
 	// Setup server socket
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);

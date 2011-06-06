@@ -14,7 +14,7 @@ class Injector
 		void injectMotionAbsolute(int x, int y);
 		void injectMotionRelative(int dx, int dy);
 		void injectButtonEvent(int button, bool press);
-		void injectKeyEvent(int keycode, bool press);
+		void injectKeyEvent(int keysym, bool press);
 	private:
 		Display* m_display;
 };

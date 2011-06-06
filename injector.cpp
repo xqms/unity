@@ -5,6 +5,7 @@
 
 #include <X11/extensions/XTest.h>
 
+#include <stdio.h>
 #include "utils.h"
 
 Injector::Injector(Display* display)
@@ -31,7 +32,9 @@ void Injector::injectButtonEvent(int button, bool press)
 	XTestFakeButtonEvent(m_display, button, press ? True : False, 0);
 }
 
-void Injector::injectKeyEvent(int keycode, bool press)
+void Injector::injectKeyEvent(int keysym, bool press)
 {
-	XTestFakeKeyEvent(m_display, keycode, press ? True : False, 0);
+	int keycode = XKeysymToKeycode(m_display, keysym);
+	if(keycode != None)
+		XTestFakeKeyEvent(m_display, keycode, press ? True : False, 0);
 }
