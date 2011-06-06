@@ -6,16 +6,19 @@
 
 #include <arpa/inet.h>
 
+#include <string>
+
 #include "utils.h"
+#include "proto.h"
 
 class Client
 {
 	public:
-		Client(int fd, in_addr addr);
+		Client(int fd, const std::string& host);
 		virtual ~Client();
 		
-		inline in_addr addr() const
-		{ return m_addr; }
+		inline const std::string& host() const
+		{ return m_host; }
 		
 		inline int fd() const
 		{ return m_fd; }
@@ -25,9 +28,12 @@ class Client
 		
 		inline void setDirection(Direction dir)
 		{ m_direction = dir; }
+		
+		int writePacket(const proto::Packet& packet);
+		int readPacket(proto::Packet* dest);
 	private:
 		int m_fd;
-		in_addr m_addr;
+		std::string m_host;
 		Direction m_direction;
 };
 

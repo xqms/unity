@@ -11,36 +11,23 @@
 #include <fcntl.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 
 #include "utils.h"
 #include "grabwindow.h"
 #include "edgewindow.h"
 #include "proto.h"
 #include "client.h"
+#include "injector.h"
 
 bool grabbing = false;
-Direction current_direction;
+Client* current_client;
 
 Display* display;
 GrabWindow* grabber;
 EdgeWindow* edges[4];
+Injector* injector;
 QList<Client*> clients;
-
-void injectMotion(int dx, int dy)
-{
-	XTestFakeRelativeMotionEvent(display, dx, dy, 0);
-}
-
-void warpTo(int x, int y)
-{
-	XWarpPointer(display, None, DefaultRootWindow(display), 0, 0, 0, 0, x, y);
-}
-
-void sendPacket(int fd, const proto::Packet& packet)
-{
-	if(write(fd, (char*)&packet, sizeof(packet)) != sizeof(packet))
-		fatal("Could not write");
-}
 
 void pass_to(Direction dir, int last_x, int last_y)
 {
@@ -62,20 +49,16 @@ void pass_to(Direction dir, int last_x, int last_y)
 	printf("Pointer is on %s screen\n", DIRECTION_STR[dir]);
 	
 	grabber->grab();
-	current_direction = dir;
+	current_client = client;
 	
 	grabbing = true;
 	
-	sendPacket(client->fd(), proto::activatePacket(last_x, last_y));
+	client->writePacket(proto::activatePacket(last_x, last_y));
 }
 
 void distributePacket(const proto::Packet& packet)
 {
-	foreach(Client* client, clients)
-	{
-		int fd = client->fd();
-		sendPacket(fd, packet);
-	}
+	current_client->writePacket(packet);
 }
 
 void handleActivate(Client* client, const proto::Packet& packet)
@@ -102,40 +85,32 @@ void handleActivate(Client* client, const proto::Packet& packet)
 		grabber->release();
 	
 	grabbing = false;
-	warpTo(x, y);
+	injector->injectMotionAbsolute(x, y);
 }
 
-void readPacket(Client* client)
+void disconnectClient(Client* client)
 {
-	int fd = client->fd();
-	proto::Packet packet;
+	printf("Client %s has disconnected\n", client->host().c_str());
+	clients.removeOne(client);
 	
-	int ret = read(fd, &packet, sizeof(proto::Packet));
-	
-	if(ret == 0)
+	if(grabbing && current_client == client)
 	{
-		printf("Client %s has disconnected\n", inet_ntoa(client->addr()));
-		clients.removeOne(client);
-		
-		if(grabbing && current_direction == client->direction())
-		{
-			grabbing = false;
-			grabber->release();
-		}
-		
-		return;
+		grabbing = false;
+		grabber->release();
 	}
 	
-	if(ret < 0)
-		fatal("Could not read from socket %d", fd);
-	
+	delete client;
+}
+
+void handlePacket(const proto::Packet& packet, Client* client)
+{
 	switch(packet.type)
 	{
 		case proto::Packet::T_MOTION:
-			injectMotion(packet.motion.dx, packet.motion.dy);
+			injector->injectMotionRelative(packet.motion.dx, packet.motion.dy);
 			break;
 		case proto::Packet::T_IDENTIFY:
-			printf("Client '%s' is in direction %s\n", inet_ntoa(client->addr()), DIRECTION_STR[packet.identify.direction]);
+			printf("Client '%s' is in direction %s\n", client->host().c_str(), DIRECTION_STR[packet.identify.direction]);
 			client->setDirection((Direction)packet.identify.direction);
 			break;
 		case proto::Packet::T_ACTIVATE:
@@ -143,16 +118,16 @@ void readPacket(Client* client)
 			handleActivate(client, packet);
 			break;
 		case proto::Packet::T_BUTTONPRESS:
-			XTestFakeButtonEvent(display, packet.button.number, True, 0);
+			injector->injectButtonEvent(packet.button.number, true);
 			break;
 		case proto::Packet::T_BUTTONRELEASE:
-			XTestFakeButtonEvent(display, packet.button.number, False, 0);
+			injector->injectButtonEvent(packet.button.number, false);
 			break;
 		case proto::Packet::T_KEYPRESS:
-			XTestFakeKeyEvent(display, packet.key.keycode, True, 0);
+			injector->injectKeyEvent(packet.key.keycode, true);
 			break;
 		case proto::Packet::T_KEYRELEASE:
-			XTestFakeKeyEvent(display, packet.key.keycode, False, 0);
+			injector->injectKeyEvent(packet.key.keycode, false);
 			break;
 	}
 }
@@ -215,15 +190,64 @@ static void add_to_fdset(fd_set* fds, int fd, int* max)
 
 void handleNewClient(int fd)
 {
-	sockaddr_in addr;
+	sockaddr_in6 addr;
 	socklen_t addrlen = sizeof(addr);
 	int client_fd = accept(fd, (sockaddr*)&addr, &addrlen);
 	if(client_fd < 0)
 		fatal("Could not accept()");
 	
-	printf("Got new client '%s' on fd %d\n", inet_ntoa(addr.sin_addr), client_fd);
+	// Get IPv4/6 address
+	char host[100];
+	if(getnameinfo((const sockaddr*)&addr, addrlen, host, sizeof(host), NULL, 0, NI_NUMERICHOST) != 0)
+		fatal("Could not convert IP address to string");
 	
-	clients.append(new Client(client_fd, addr.sin_addr));
+	printf("Got new client '%s' on fd %d\n", host, client_fd);
+	
+	clients.append(new Client(client_fd, host));
+}
+
+void connectTo(Direction dir, const char* host)
+{
+	addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_family = PF_UNSPEC;
+	
+	addrinfo* addr_result;
+	if(getaddrinfo(host, "6030", &hints, &addr_result) != 0)
+		fatal("Could not resolve host '%s'", host);
+	
+	int fd = -1;
+	addrinfo* loop;
+	
+	for(loop = addr_result; loop; loop = loop->ai_next)
+	{
+		fd = socket(loop->ai_family, loop->ai_socktype, loop->ai_protocol);
+		if(fd < 0)
+			continue;
+		
+		if(connect(fd, loop->ai_addr, loop->ai_addrlen) != 0)
+		{
+			close(fd);
+			continue;
+		}
+		
+		break;
+	}
+	
+	if(!loop)
+		fatal("Could not connect to client '%s'", host);
+	
+	freeaddrinfo(addr_result);
+	
+	printf("Connected to client '%s'\n", host);
+	
+	Client* client = new Client(fd, host);
+	clients.append(client);
+	
+	// Send identify packet
+	client->writePacket(proto::identifyPacket(oppositeDirection(dir)));
+	client->setDirection(dir);
 }
 
 int main(int argc, char **argv)
@@ -265,37 +289,13 @@ int main(int argc, char **argv)
 		if(dir == D_UNKNOWN)
 			fatal("Unknown direction %s", str_dir);
 		
-		int client_fd = socket(AF_INET, SOCK_STREAM, 0);
-		if(client_fd < 0)
-			fatal("Could not allocate client socket");
-		
-		sockaddr_in saddr;
-		saddr.sin_family = AF_INET;
-		saddr.sin_addr.s_addr = inet_addr(addr);
-		saddr.sin_port = htons(6030);
-		
-		if(connect(client_fd, (const sockaddr*)&saddr, sizeof(saddr)) != 0)
-			fatal("Could not connect to client '%s'", addr);
-		
-		printf("Connected to client '%s' on fd %d\n", addr, client_fd);
-		
-		Client* client = new Client(client_fd, saddr.sin_addr);
-		clients.append(client);
-		
-		// Send identify packet
-		sendPacket(client_fd, proto::identifyPacket(oppositeDirection(dir)));
-		client->setDirection(dir);
+		connectTo(dir, addr);
 	}
 	
 	// Get X screen
 	display = XOpenDisplay(0);
 	if(!display)
 		fatal("Could not open display");
-	
-	// We need the XTest extension
-	int opcode, event, error;
-	if(!XQueryExtension(display, XTestExtensionName, &opcode, &event, &error))
-		fatal("X server does not have XTest extension, aborting");
 	
 	// Setup grab window
 	grabber = new GrabWindow(display);
@@ -304,8 +304,11 @@ int main(int argc, char **argv)
 	for(int i = 0; i < 4; ++i)
 		edges[i] = new EdgeWindow(display, (Direction)i);
 	
+	injector = new Injector(display);
+	
 	int x11_fd = ConnectionNumber(display);
 	
+	proto::Packet packet;
 	fd_set fds;
 	
 	while(1)
@@ -335,7 +338,10 @@ int main(int argc, char **argv)
 		{
 			if(FD_ISSET(client->fd(), &fds))
 			{
-				readPacket(client);
+				if(client->readPacket(&packet) != 0)
+					disconnectClient(client);
+				else
+					handlePacket(packet, client);
 			}
 		}
 	}

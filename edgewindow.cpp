@@ -20,6 +20,7 @@ EdgeWindow::EdgeWindow(Display* display, Direction dir)
 		case D_RIGHT:  x = sw-1; y = 0;    w = 1;    h = sh;   break;
 		case D_TOP:    x = 1;    y = 0;    w = sw-2; h = 1;    break;
 		case D_BOTTOM: x = 1;    y = sh-1; w = sw-2; h = 1;    break;
+		case D_UNKNOWN: fatal("D_UNKNOWN in EdgeWindow");
 	}
 	
 	XSetWindowAttributes attr;

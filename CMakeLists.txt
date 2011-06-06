@@ -8,12 +8,15 @@ include(${QT_USE_FILE})
 find_package(X11 REQUIRED)
 include_directories(${X11_X11_INCLUDE_PATH})
 
+set(CMAKE_CXX_FLAGS_DEBUG "-Wall")
+
 add_executable(unity
 	main.cpp
 	utils.cpp
 	grabwindow.cpp
 	edgewindow.cpp
 	client.cpp
+	injector.cpp
 )
 
 target_link_libraries(unity
