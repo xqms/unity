@@ -90,6 +90,18 @@ void handleActivate(Client* client, const proto::Packet& packet)
 	injector->injectMotionAbsolute(x, y);
 }
 
+bool directionUsed(Direction dir)
+{
+	for(std::set<Client*>::iterator it = clients.begin();
+	  it != clients.end(); ++it)
+	{
+		if((*it)->direction() == dir)
+			return true;
+	}
+	
+	return false;
+}
+
 void disconnectClient(Client* client)
 {
 	printf("Client %s has disconnected\n", client->host().c_str());
@@ -101,7 +113,26 @@ void disconnectClient(Client* client)
 		grabber->release();
 	}
 	
+	// Test wether another client uses this direction
+	if(!directionUsed(client->direction()))
+	{
+		delete edges[client->direction()];
+		edges[client->direction()] = 0;
+	}
+	
 	delete client;
+}
+
+void handleIdentify(Client* client, Direction dir)
+{
+	client->setDirection(dir);
+	
+	// Check if we need to create the corresponding egde window
+	if(dir >= 4)
+		return;
+	
+	if(!edges[dir])
+		edges[dir] = new EdgeWindow(display, dir);
 }
 
 void handlePacket(const proto::Packet& packet, Client* client)
@@ -113,7 +144,7 @@ void handlePacket(const proto::Packet& packet, Client* client)
 			break;
 		case proto::Packet::T_IDENTIFY:
 			printf("Client '%s' is in direction %s\n", client->host().c_str(), DIRECTION_STR[packet.identify.direction]);
-			client->setDirection((Direction)packet.identify.direction);
+			handleIdentify(client, (Direction)packet.identify.direction);
 			break;
 		case proto::Packet::T_ACTIVATE:
 			printf("Pointer is on my screen\n");
@@ -146,6 +177,9 @@ void handleXEvents()
 			case EnterNotify:
 				for(int i = 0; i < 4; ++i)
 				{
+					if(!edges[i])
+						continue;
+					
 					if(edges[i]->window() == event.xcrossing.window)
 					{
 						printf("Switch to %s\n", DIRECTION_STR[i]);
@@ -253,6 +287,10 @@ void connectTo(Direction dir, const char* host)
 	Client* client = new Client(fd, host);
 	clients.insert(client);
 	
+	// Setup edge window
+	if(!edges[dir])
+		edges[dir] = new EdgeWindow(display, dir);
+	
 	// Send identify packet
 	client->writePacket(proto::identifyPacket(oppositeDirection(dir)));
 	client->setDirection(dir);
@@ -261,6 +299,11 @@ void connectTo(Direction dir, const char* host)
 int main(int argc, char **argv)
 {
 	setlocale(LC_ALL, "");
+	
+	// Get X screen
+	display = XOpenDisplay(0);
+	if(!display)
+		fatal("Could not open display");
 	
 	// Setup server socket
 	int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -277,6 +320,14 @@ int main(int argc, char **argv)
 	
 	if(listen(server_fd, 15) != 0)
 		fatal("Could not listen()");
+	
+	// Setup grab window
+	grabber = new GrabWindow(display);
+	
+	// Setup event injection
+	injector = new Injector(display);
+	
+	memset(edges, 0, sizeof(edges));
 	
 	// Connect to listed clients
 	for(int i = 1; i < argc-1; ++i)
@@ -299,20 +350,6 @@ int main(int argc, char **argv)
 		
 		connectTo(dir, addr);
 	}
-	
-	// Get X screen
-	display = XOpenDisplay(0);
-	if(!display)
-		fatal("Could not open display");
-	
-	// Setup grab window
-	grabber = new GrabWindow(display);
-	
-	// Setup edge windows
-	for(int i = 0; i < 4; ++i)
-		edges[i] = new EdgeWindow(display, (Direction)i);
-	
-	injector = new Injector(display);
 	
 	int x11_fd = ConnectionNumber(display);
 	
