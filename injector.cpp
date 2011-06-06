@@ -29,6 +29,26 @@ void Injector::injectMotionRelative(int dx, int dy)
 
 void Injector::injectButtonEvent(int button, bool press)
 {
+	// XTest only supports the first 10 buttons.
+	// For special buttons, deliver them to the root window,
+	// as it is likely someone is listening for them there.
+	if(button > 5)
+	{
+		XButtonEvent event;
+		event.type = press ? ButtonPress : ButtonRelease;
+		event.display = m_display;
+		event.root = DefaultRootWindow(m_display);
+		event.window = DefaultRootWindow(m_display);
+		event.send_event = True;
+		event.button = button;
+		event.state = 0;
+		
+		XSendEvent(m_display, DefaultRootWindow(m_display), False,
+			ButtonPressMask | ButtonReleaseMask, (XEvent*)&event);
+		
+		return;
+	}
+	
 	XTestFakeButtonEvent(m_display, button, press ? True : False, 0);
 }
 
