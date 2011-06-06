@@ -1,9 +1,6 @@
 // Unity: a mouse/keyboard sharing solution
 // Author: Max Schwarz <Max@x-quadraht.de>
 
-#include <QtGui/QApplication>
-#include <QtCore/QList>
-
 #include <X11/Xlib.h>
 #include <X11/extensions/XTest.h>
 
@@ -12,6 +9,8 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+
+#include <set>
 
 #include "utils.h"
 #include "grabwindow.h"
@@ -27,13 +26,16 @@ Display* display;
 GrabWindow* grabber;
 EdgeWindow* edges[4];
 Injector* injector;
-QList<Client*> clients;
+std::set<Client*> clients;
 
 void pass_to(Direction dir, int last_x, int last_y)
 {
 	Client* client = 0;
-	foreach(Client* c, clients)
+	for(std::set<Client*>::iterator it = clients.begin();
+	  it != clients.end(); ++it)
 	{
+		Client* c = *it;
+		
 		if(c->direction() == dir)
 		{
 			client = c;
@@ -91,7 +93,7 @@ void handleActivate(Client* client, const proto::Packet& packet)
 void disconnectClient(Client* client)
 {
 	printf("Client %s has disconnected\n", client->host().c_str());
-	clients.removeOne(client);
+	clients.erase(client);
 	
 	if(grabbing && current_client == client)
 	{
@@ -209,7 +211,7 @@ void handleNewClient(int fd)
 	
 	printf("Got new client '%s' on fd %d\n", host, client_fd);
 	
-	clients.append(new Client(client_fd, host));
+	clients.insert(new Client(client_fd, host));
 }
 
 void connectTo(Direction dir, const char* host)
@@ -249,7 +251,7 @@ void connectTo(Direction dir, const char* host)
 	printf("Connected to client '%s'\n", host);
 	
 	Client* client = new Client(fd, host);
-	clients.append(client);
+	clients.insert(client);
 	
 	// Send identify packet
 	client->writePacket(proto::identifyPacket(oppositeDirection(dir)));
@@ -325,8 +327,9 @@ int main(int argc, char **argv)
 		add_to_fdset(&fds, x11_fd, &max);
 		add_to_fdset(&fds, server_fd, &max);
 		
-		foreach(Client* client, clients)
-			add_to_fdset(&fds, client->fd(), &max);
+		for(std::set<Client*>::iterator it = clients.begin();
+		  it != clients.end(); ++it)
+			add_to_fdset(&fds, (*it)->fd(), &max);
 		
 		XPending(display);
 		int ret = select(max + 1, &fds, 0, 0, 0);
@@ -340,8 +343,11 @@ int main(int argc, char **argv)
 		if(FD_ISSET(server_fd, &fds))
 			handleNewClient(server_fd);
 		
-		foreach(Client* client, clients)
+		for(std::set<Client*>::iterator it = clients.begin();
+		  it != clients.end(); ++it)
 		{
+			Client* client = *it;
+			
 			if(FD_ISSET(client->fd(), &fds))
 			{
 				if(client->readPacket(&packet) != 0)
